@@ -53,6 +53,11 @@ typedef struct {
 
 	area_id					sharedArea;
 	virtio_gpu_shared_info* sharedInfo;
+
+	mutex					openLock;
+	int32					openCount;
+		// the first open sets the device up, the last free tears it down
+	char					deviceName[64];
 } virtio_gpu_driver_info;
 
 
@@ -511,6 +516,7 @@ virtio_gpu_init_device(void* _info, void** _cookie)
 
 	info->commandPhysAddr = entry.address;
 	mutex_init(&info->commandLock, "virtiogpu command lock");
+	mutex_init(&info->openLock, "virtiogpu open lock");
 
 	// Setup interrupt
 	status = info->virtio->setup_interrupt(info->virtio_device, NULL, info);
@@ -530,6 +536,8 @@ virtio_gpu_init_device(void* _info, void** _cookie)
 	return B_OK;
 
 err3:
+	mutex_destroy(&info->commandLock);
+	mutex_destroy(&info->openLock);
 err2:
 	delete_area(info->commandArea);
 err1:
@@ -546,6 +554,7 @@ virtio_gpu_uninit_device(void* _cookie)
 	info->virtio->free_interrupts(info->virtio_device);
 
 	mutex_destroy(&info->commandLock);
+	mutex_destroy(&info->openLock);
 
 	delete_area(info->commandArea);
 	info->commandArea = -1;
@@ -566,6 +575,15 @@ virtio_gpu_open(void* _info, const char* path, int openMode, void** _cookie)
 		sizeof(virtio_gpu_handle));
 	if (handle == NULL)
 		return B_NO_MEMORY;
+
+	MutexLocker openLocker(&info->openLock);
+	if (info->openCount++ > 0) {
+		// Later openers, such as accelerant clones, share the device as the
+		// first one set it up.
+		handle->info = info;
+		*_cookie = handle;
+		return B_OK;
+	}
 
 	info->sharedArea = -1;
 	info->framebufferArea = -1;
@@ -648,6 +666,7 @@ error:
 	info->sharedArea = -1;
 	delete_sem(info->commandDone);
 	info->commandDone = -1;
+	info->openCount--;
 	free(handle);
 	return B_ERROR;
 }
@@ -656,14 +675,7 @@ error:
 static status_t
 virtio_gpu_close(void* cookie)
 {
-	virtio_gpu_handle* handle = (virtio_gpu_handle*)cookie;
 	CALLED();
-
-	virtio_gpu_driver_info* info = handle->info;
-	info->updateThreadRunning = false;
-	delete_sem(info->commandDone);
-	info->commandDone  = -1;
-
 	return B_OK;
 }
 
@@ -675,15 +687,36 @@ virtio_gpu_free(void* cookie)
 	virtio_gpu_handle* handle = (virtio_gpu_handle*)cookie;
 
 	virtio_gpu_driver_info* info = handle->info;
+	free(handle);
+
+	MutexLocker openLocker(&info->openLock);
+	if (--info->openCount > 0)
+		return B_OK;
+
+	info->updateThreadRunning = false;
 	int32 result;
 	wait_for_thread(info->updateThread, &result);
 	info->updateThread = -1;
+
+	// Stop the host from reading the framebuffer before freeing it, and
+	// release the resource, so that the next first open can create it again.
+	status_t status;
+	{
+		MutexLocker commandLocker(&info->commandLock);
+		status = virtio_gpu_set_scanout(info, 0, 0, 0, 0);
+		if (status == B_OK)
+			status = virtio_gpu_unref(info, info->displayResourceId);
+	}
 	virtio_gpu_drain_queues(info);
-	delete_area(info->framebufferArea);
+	if (status == B_OK)
+		delete_area(info->framebufferArea);
+	else
+		ERROR("free: the host may still use the framebuffer, keeping it\n");
 	info->framebufferArea = -1;
 	delete_area(info->sharedArea);
 	info->sharedArea = -1;
-	free(handle);
+	delete_sem(info->commandDone);
+	info->commandDone = -1;
 	return B_OK;
 }
 
@@ -736,6 +769,13 @@ virtio_gpu_ioctl(void* cookie, uint32 op, void* buffer, size_t length)
 		// needed to share data between kernel and accelerant
 		case VIRTIO_GPU_GET_PRIVATE_DATA:
 			return user_memcpy(buffer, &info->sharedArea, sizeof(area_id));
+
+		// the accelerant clones open the device by this name
+		case VIRTIO_GPU_GET_DEVICE_NAME:
+			if (user_strlcpy((char*)buffer, info->deviceName,
+					B_PATH_NAME_LENGTH) < B_OK)
+				return B_BAD_ADDRESS;
+			return B_OK;
 
 		case VIRTIO_GPU_SET_DISPLAY_MODE:
 		{
@@ -845,11 +885,10 @@ virtio_gpu_register_child_devices(void* _cookie)
 	if (id < 0)
 		return id;
 
-	char name[64];
-	snprintf(name, sizeof(name), "graphics/virtio/%" B_PRId32,
-		id);
+	snprintf(info->deviceName, sizeof(info->deviceName),
+		"graphics/virtio/%" B_PRId32, id);
 
-	status = sDeviceManager->publish_device(info->node, name,
+	status = sDeviceManager->publish_device(info->node, info->deviceName,
 		VIRTIO_GPU_DEVICE_MODULE_NAME);
 
 	return status;
