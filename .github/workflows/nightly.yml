@@ -61,7 +61,12 @@ jobs:
             if gh run download "${{ github.run_id }}" --repo "${{ github.repository }}" \
                  --name "boot-pass-${arch}" --dir "/tmp/pass-${arch}" 2>/dev/null; then
               gh run download "${{ github.run_id }}" --repo "${{ github.repository }}" \
-                 --name "image-${arch}" --dir "staging" 2>/dev/null || continue
+                 --name "image-${arch}" --dir "/tmp/image-${arch}" 2>/dev/null || continue
+              # A marker per image that booted: an arch may ship one image
+              # while another of its images failed.
+              for pass in "/tmp/pass-${arch}"/*; do
+                mv "/tmp/image-${arch}/${pass##*/}" "/tmp/image-${arch}/${pass##*/}.sha256" staging/
+              done
               published="${published} ${arch}"
               echo "including ${arch}"
             else
@@ -99,8 +104,10 @@ jobs:
             echo "\`x86_gcc2h\` is the 32-bit image: gcc2 for the system, GCC 13 for x86"
             echo "secondary packages."
             echo ""
-            echo "\`arm64\` is a disk image for QEMU's \`virt\` machine with EDK2 firmware,"
-            echo "built from the RenkuOSPorts arm64 packages. Decompress it with \`zstd -d\`."
+            echo "\`arm64\` comes as a disk image for QEMU's \`virt\` machine with EDK2"
+            echo "firmware (\`.img.zst\`, decompress it with \`zstd -d\`) and as an EFI-only"
+            echo "\`.iso\` to boot from a CD, for example in Parallels Desktop on Apple"
+            echo "Silicon. Both are built from the RenkuOSPorts arm64 packages."
             echo "It is Tier 2: it ships when it boots, and it has no clock driver yet."
             echo ""
             echo "Every image here booted under emulation without entering the kernel"
