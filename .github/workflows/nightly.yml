@@ -61,7 +61,12 @@ jobs:
             if gh run download "${{ github.run_id }}" --repo "${{ github.repository }}" \
                  --name "boot-pass-${arch}" --dir "/tmp/pass-${arch}" 2>/dev/null; then
               gh run download "${{ github.run_id }}" --repo "${{ github.repository }}" \
-                 --name "image-${arch}" --dir "staging" 2>/dev/null || continue
+                 --name "image-${arch}" --dir "/tmp/image-${arch}" 2>/dev/null || continue
+              # A marker per image that booted: an arch may ship one image
+              # while another of its images failed.
+              for pass in "/tmp/pass-${arch}"/*; do
+                mv "/tmp/image-${arch}/${pass##*/}" "/tmp/image-${arch}/${pass##*/}.sha256" staging/
+              done
               published="${published} ${arch}"
               echo "including ${arch}"
               # The system package repository of the same build, for mirrors
@@ -128,11 +133,16 @@ jobs:
                           how="Write it to a USB stick, or boot it in a virtual machine" ;;
                   x86_gcc2h) who="32-bit PC"
                              how="Write it to a USB stick, or boot it in a virtual machine" ;;
-                  arm64) who="ARM64, in QEMU"
-                         how="Decompress it with \`zstd -d\`, then start it as shown below" ;;
+                  arm64) case "${name}" in
+                           *.iso) who="ARM64, from a CD (e.g. Parallels Desktop on Apple Silicon)"
+                                  how="Boot it from a virtual CD; it is EFI-only"
+                                  ARM64_ISO="${name}" ;;
+                           *) who="ARM64, in QEMU"
+                              how="Decompress it with \`zstd -d\`, then start it as shown below"
+                              ARM64_IMAGE="${name}" ;;
+                         esac ;;
                 esac
                 echo "| ${who} | [\`${name}\`](${URL}/${name}) | ${how} |"
-                if [ "${arch}" = arm64 ]; then ARM64_IMAGE="${name}"; fi
               done
             done
             echo ""
@@ -169,8 +179,8 @@ jobs:
             echo ""
             echo "\`x86_gcc2h\` is the 32-bit image: gcc2 for the system, GCC 13 for x86"
             echo "secondary packages."
-            if [ -n "${ARM64_IMAGE:-}" ]; then
-              echo "The arm64 image is built from the RenkuOSPorts arm64 packages."
+            if [ -n "${ARM64_IMAGE:-}${ARM64_ISO:-}" ]; then
+              echo "The arm64 images are built from the RenkuOSPorts arm64 packages."
             fi
             echo ""
             echo "Every image here booted under emulation without entering the kernel"
