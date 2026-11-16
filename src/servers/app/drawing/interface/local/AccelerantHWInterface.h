@@ -45,6 +45,8 @@ public:
 									const display_mode* low,
 									const display_mode* high);
 	virtual	status_t			GetPreferredMode(display_mode* mode);
+	virtual	bool				FollowsPreferredMode() const
+									{ return fDisplayChangeThread >= 0; }
 	virtual status_t			GetMonitorInfo(monitor_info* info);
 
 	virtual sem_id				RetraceSemaphore();
@@ -110,6 +112,7 @@ private:
 			status_t			_SetFallbackMode(display_mode& mode) const;
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
+	static	status_t			_DisplayChangeThread(void* data);
 
 private:
 			int					fCardFD;
@@ -170,6 +173,9 @@ private:
 			bool				fInitialModeSwitch;
 
 			sem_id				fRetraceSemaphore;
+			sem_id				fDisplayChangeSemaphore;
+			thread_id			fDisplayChangeThread;
+			bool				fDisplayChangeQuit;
 
 	mutable	fill_rect_params*	fRectParams;
 	mutable	uint32				fRectParamsCount;

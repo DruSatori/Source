@@ -18,6 +18,7 @@
 
 #include <new>
 
+#include <accelerant_private_hooks.h>
 #include <dirent.h>
 #include <edid.h>
 #include <driver_settings.h>
@@ -150,6 +151,9 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fInitialModeSwitch(true),
 
 	fRetraceSemaphore(-1),
+	fDisplayChangeSemaphore(-1),
+	fDisplayChangeThread(-1),
+	fDisplayChangeQuit(false),
 
 	fRectParams(new (nothrow) fill_rect_params[kDefaultParamsCount]),
 	fRectParamsCount(kDefaultParamsCount),
@@ -202,8 +206,21 @@ AccelerantHWInterface::Initialize()
 			close(fCardFD);
 			// _OpenAccelerant() failed, try to open next graphics card
 		}
+		if (fCardFD < 0)
+			return fCardFD;
 
-		return fCardFD >= 0 ? B_OK : fCardFD;
+		accelerant_display_change_semaphore displayChangeSemaphore
+			= (accelerant_display_change_semaphore)fAccelerantHook(
+				ACCELERANT_DISPLAY_CHANGE_SEMAPHORE, NULL);
+		if (displayChangeSemaphore != NULL)
+			fDisplayChangeSemaphore = displayChangeSemaphore();
+		if (fDisplayChangeSemaphore >= 0) {
+			fDisplayChangeThread = spawn_thread(_DisplayChangeThread,
+				"display change watcher", B_NORMAL_PRIORITY, this);
+			if (fDisplayChangeThread >= 0)
+				resume_thread(fDisplayChangeThread);
+		}
+		return B_OK;
 	}
 	return ret;
 }
@@ -440,6 +457,14 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 status_t
 AccelerantHWInterface::Shutdown()
 {
+	if (fDisplayChangeThread >= 0) {
+		// the semaphore belongs to the driver, just wake the thread up
+		fDisplayChangeQuit = true;
+		release_sem(fDisplayChangeSemaphore);
+		wait_for_thread(fDisplayChangeThread, NULL);
+		fDisplayChangeThread = -1;
+	}
+
 	if (fAccelerantHook != NULL) {
 		uninit_accelerant uninitAccelerant
 			= (uninit_accelerant)fAccelerantHook(B_UNINIT_ACCELERANT, NULL);
@@ -459,6 +484,40 @@ AccelerantHWInterface::Shutdown()
 		fCardFD = -1;
 	}
 
+	return B_OK;
+}
+
+
+/*!	Waits for the accelerant's display change semaphore and tells the
+	listeners (the Desktop) that the preferred mode changed, once it has been
+	quiet for a moment, so that dragging a VM window edge doesn't cause a mode
+	switch per pixel. Exits when Shutdown() tells it to, or when the semaphore
+	is gone.
+*/
+/*static*/ status_t
+AccelerantHWInterface::_DisplayChangeThread(void* data)
+{
+	AccelerantHWInterface* interface = (AccelerantHWInterface*)data;
+	const bigtime_t kQuietTime = 250000;
+
+	while (!interface->fDisplayChangeQuit) {
+		status_t status = acquire_sem(interface->fDisplayChangeSemaphore);
+		if (status == B_INTERRUPTED)
+			continue;
+		if (status != B_OK)
+			return status;
+
+		while (!interface->fDisplayChangeQuit) {
+			status = acquire_sem_etc(interface->fDisplayChangeSemaphore, 1,
+				B_RELATIVE_TIMEOUT, kQuietTime);
+			if (status == B_TIMED_OUT) {
+				interface->_NotifyScreenChanged();
+				break;
+			}
+			if (status != B_OK && status != B_INTERRUPTED)
+				return status;
+		}
+	}
 	return B_OK;
 }
 
