@@ -200,3 +200,14 @@ virtio_gpu_accelerant_retrace_semaphore()
 	return -1;
 }
 
+
+sem_id
+virtio_gpu_display_change_semaphore()
+{
+	sem_id sem;
+	if (ioctl(gInfo->device, VIRTIO_GPU_GET_DISPLAY_CHANGE_SEM, &sem,
+			sizeof(sem)) != 0) {
+		return -1;
+	}
+	return sem;
+}
