@@ -183,7 +183,9 @@ ScreenManager::ScreenChanged(Screen* screen)
 
 	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
 		screen_item* item = fScreenList.ItemAt(i);
-		if (item->screen.Get() == screen)
+		// A screen without owner takes the preferred mode when it gets one
+		// (see VirtualScreen::AddScreen()).
+		if (item->screen.Get() == screen && item->owner != NULL)
 			item->owner->ScreenChanged(screen);
 	}
 }

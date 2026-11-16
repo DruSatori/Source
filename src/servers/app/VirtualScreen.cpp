@@ -121,7 +121,14 @@ VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurati
 
 	status_t status = B_ERROR;
 	display_mode mode;
-	if (_GetMode(screen, configurations, mode) == B_OK) {
+	if (screen->HWInterface()->FollowsPreferredMode()) {
+		// The host's window size wins over the settings (see
+		// Desktop::ScreenChanged())
+		status = screen->SetPreferredMode();
+		if (status == B_OK)
+			screen->GetMode(mode);
+	}
+	if (status != B_OK && _GetMode(screen, configurations, mode) == B_OK) {
 		// we found settings for this screen, and try to apply them now
 		status = screen->SetMode(mode);
 	}
