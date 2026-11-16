@@ -2997,6 +2997,68 @@ Desktop::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		// sent by ScreenChanged(): follow the preferred mode on all
+		// workspaces that have no mode stored by Screen preferences, without
+		// storing it
+		case 'DSPC':
+		{
+			// shortcut: app_server drives only one screen (see
+			// ScreenManager::_ScanDrivers()), loop over all when it does more
+			display_mode mode;
+			int32 id;
+			bool follows;
+			{
+				AutoReadLocker _(fScreenLock);
+				Screen* screen = fVirtualScreen.ScreenAt(0);
+				if (screen == NULL
+					|| screen->HWInterface()->GetPreferredMode(&mode) != B_OK)
+					break;
+				id = screen->ID();
+				follows = screen->HWInterface()->FollowsPreferredMode();
+			}
+			if (!follows) {
+				// RemoteHWInterface: rebuild the screen as before, also when
+				// a client reconnects with an unchanged size
+				AutoWriteLocker windowLocker(fWindowLock);
+				Screen* screen = fVirtualScreen.ScreenByID(id);
+				if (screen == NULL)
+					break;
+				AutoWriteLocker screenLocker(fScreenLock);
+				screen->SetPreferredMode();
+				screenLocker.Unlock();
+				_ScreenChanged(screen);
+				break;
+			}
+
+			// A mode the user stored with Screen preferences wins; without
+			// one, VirtualScreen::AddScreen() takes the preferred mode on a
+			// workspace switch, so keep the current configurations in line.
+			AutoWriteLocker windowLocker(fWindowLock);
+			Screen* screen = fVirtualScreen.ScreenByID(id);
+			if (screen == NULL)
+				break;
+			monitor_info info;
+			bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+			BRect frame(0, 0, mode.virtual_width - 1, mode.virtual_height - 1);
+			int32 follow = -1;
+			for (int32 i = 0; i < kMaxWorkspaces; i++) {
+				if (fWorkspaces[i].StoredScreenConfiguration().BestFit(id,
+						hasInfo ? &info : NULL) != NULL)
+					continue;
+				if (i == fCurrentWorkspace)
+					follow = i;
+				else {
+					fWorkspaces[i].CurrentScreenConfiguration().Set(id,
+						hasInfo ? &info : NULL, frame, mode);
+				}
+			}
+			windowLocker.Unlock();
+
+			if (follow >= 0)
+				SetScreenMode(follow, id, mode, false);
+			break;
+		}
+
 		default:
 			printf("Desktop %d:%s received unexpected code %" B_PRId32 "\n", 0,
 				"baron", code);
@@ -3761,16 +3823,16 @@ Desktop::_ResumeDirectFrameBufferAccess()
 }
 
 
+/*!	Called by the screen manager when a screen's preferred mode changed (a
+	virtual machine's window was resized, see
+	ACCELERANT_DISPLAY_CHANGE_SEMAPHORE). The caller holds the screen manager
+	lock, which we must not hold while taking the window lock, so the mode is
+	switched from the Desktop thread.
+*/
 void
-Desktop::ScreenChanged(Screen* screen)
+Desktop::ScreenChanged(Screen* /*screen*/)
 {
-	AutoWriteLocker windowLocker(fWindowLock);
-
-	AutoWriteLocker screenLocker(fScreenLock);
-	screen->SetPreferredMode();
-	screenLocker.Unlock();
-
-	_ScreenChanged(screen);
+	PostMessage('DSPC');
 }
 
 
