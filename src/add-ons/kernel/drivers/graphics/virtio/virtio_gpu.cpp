@@ -632,6 +632,8 @@ virtio_gpu_open(void* _info, const char* path, int openMode, void** _cookie)
 	// so we can fit every mode
 	info->framebufferWidth = 3840;
 	info->framebufferHeight = 2160;
+	info->sharedInfo->max_width = info->framebufferWidth;
+	info->sharedInfo->max_height = info->framebufferHeight;
 
 	// create framebuffer area
 	info->framebufferSize = 4 * info->framebufferWidth * info->framebufferHeight;
@@ -805,6 +807,13 @@ virtio_gpu_ioctl(void* cookie, uint32 op, void* buffer, size_t length)
 			display_mode mode;
 			if (user_memcpy(&mode, buffer, sizeof(display_mode)) != B_OK)
 				return B_BAD_ADDRESS;
+
+			// the resource is backed by the framebuffer, it must not exceed it
+			if (mode.virtual_width == 0 || mode.virtual_height == 0
+				|| mode.virtual_width > info->framebufferWidth
+				|| mode.virtual_height > info->framebufferHeight) {
+				return B_BAD_VALUE;
+			}
 
 			MutexLocker commandLocker(&info->commandLock);
 
