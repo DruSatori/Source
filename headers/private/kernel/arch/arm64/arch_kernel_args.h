@@ -49,6 +49,10 @@ typedef struct {
 	// Virtual timer interrupt (GIC INTID) from the ACPI GTDT, 0 if unknown
 	uint32		timer_interrupt;
 
+	// Seconds since 1970 of the EFI clock when the loader read it, 0 if
+	// the firmware gave no valid time
+	uint64		rtc_boot_seconds;
+
 } _PACKED arch_kernel_args;
 
 #endif	/* KERNEL_ARCH_ARM64_KERNEL_ARGS_H */

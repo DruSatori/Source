@@ -45,6 +45,49 @@ arch_convert_kernel_args(void)
 }
 
 
+/*!	Reads the EFI clock as seconds since 1970, or 0 if there's no valid time.
+	Like the CMOS clock on x86, an unspecified time zone means the clock is
+	in whatever time the RTC_time_settings say (local or GMT); a time with a
+	known offset is converted to GMT.
+*/
+static uint64
+read_efi_clock()
+{
+	efi_time time;
+	efi_status status = kRuntimeServices->GetTime(&time, NULL);
+	if (status != EFI_SUCCESS) {
+		dprintf("EFI GetTime failed: %#lx\n", status);
+		return 0;
+	}
+	dprintf("EFI time: %04u-%02u-%02u %02u:%02u:%02u, time zone %d, "
+		"daylight %#x\n", time.Year, time.Month, time.Day, time.Hour,
+		time.Minute, time.Second, time.TimeZone, time.Daylight);
+
+	if (time.Year < 1970 || time.Month < 1 || time.Month > 12 || time.Day < 1
+		|| time.Day > 31 || time.Hour > 23 || time.Minute > 59
+		|| time.Second > 59) {
+		dprintf("EFI time is invalid, ignoring it\n");
+		return 0;
+	}
+
+	// Julian day number, as rtc_tm_to_secs() in the kernel computes it
+	int year = time.Year, month = time.Month;
+	int days = time.Day - 32075 - 2440588
+		+ 1461 * (year + 4800 + (month - 14) / 12) / 4
+		+ 367 * (month - 2 - 12 * ((month - 14) / 12)) / 12
+		- 3 * ((year + 4900 + (month - 14) / 12) / 100) / 4;
+	int64 seconds = (int64)days * 86400 + time.Hour * 3600 + time.Minute * 60
+		+ time.Second;
+
+	// UEFI 2.7 and later: local time = UTC + TimeZone (minutes)
+	if (time.TimeZone != EFI_UNSPECIFIED_TIMEZONE
+		&& time.TimeZone >= -1440 && time.TimeZone <= 1440)
+		seconds -= time.TimeZone * 60;
+
+	return seconds > 0 ? seconds : 0;
+}
+
+
 void
 arm64_common_cpu_startup()
 {
@@ -87,6 +130,9 @@ arm64_common_cpu_startup()
 void
 arch_start_kernel(addr_t kernelEntry)
 {
+	// There's no RTC driver in the kernel; EFI is our only clock.
+	gKernelArgs.arch_args.rtc_boot_seconds = read_efi_clock();
+
 	// Prepare to exit EFI boot services.
 	// Read the memory map.
 	// First call is to determine the buffer size.
