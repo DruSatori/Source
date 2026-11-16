@@ -10,6 +10,8 @@
 
 #include <new>
 
+#include <accelerant_private_hooks.h>
+
 
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* data)
@@ -30,6 +32,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)virtio_gpu_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)virtio_gpu_accelerant_retrace_semaphore;
+		case ACCELERANT_DISPLAY_CHANGE_SEMAPHORE:
+			return (void*)virtio_gpu_display_change_semaphore;
 
 		/* mode configuration */
 		case B_ACCELERANT_MODE_COUNT:
