@@ -162,6 +162,11 @@ fixup_entry(phys_addr_t ptPa, int level, addr_t va, bool wr)
 			asm("isb");
 			return true;
 		}
+		// Another CPU fixed the entry after our fault (set the access flag, or
+		// made a dirty-tracked page writable): retry the access
+		if (!wr || ((oldPte & kAttrAF) != 0 && (oldPte & kAttrSWDBM) != 0
+				&& (oldPte & kAttrAPReadOnly) == 0))
+			return true;
 		if (wr && (oldPte & kAttrSWDBM) != 0 && (oldPte & kAttrAPReadOnly) != 0) {
 			uint64_t newPte = oldPte & ~kAttrAPReadOnly;
             if ((uint64_t)atomic_test_and_set64((int64*)pte, newPte, oldPte) != oldPte)
