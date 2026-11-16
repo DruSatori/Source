@@ -518,7 +518,7 @@ setup_queue(void* cookie, uint16 queue, phys_addr_t phy, phys_addr_t phyAvail,
 	} else {
 		legacy_write_16(bus, bus->base_addr + VIRTIO_PCI_QUEUE_SEL, queue);
 		legacy_write_32(bus, bus->base_addr + VIRTIO_PCI_QUEUE_PFN,
-			(uint32)phy >> VIRTIO_PCI_QUEUE_ADDR_SHIFT);
+			(uint32)(phy >> VIRTIO_PCI_QUEUE_ADDR_SHIFT));
 	}
 	return B_OK;
 }
