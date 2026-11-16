@@ -688,6 +688,8 @@ virtio_gpu_setup_display(virtio_gpu_driver_info* info)
 		// so we can fit every mode
 		info->framebufferWidth = 3840;
 		info->framebufferHeight = 2160;
+		info->sharedInfo->max_width = info->framebufferWidth;
+		info->sharedInfo->max_height = info->framebufferHeight;
 
 		// create framebuffer area
 		info->framebufferSize = 4 * info->framebufferWidth * info->framebufferHeight;
