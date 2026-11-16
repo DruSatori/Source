@@ -121,6 +121,8 @@ public:
 									const display_mode* low,
 									const display_mode* high) = 0;
 	virtual	status_t			GetPreferredMode(display_mode* mode);
+	virtual	bool				FollowsPreferredMode() const
+									{ return false; }
 	virtual status_t			GetMonitorInfo(monitor_info* info);
 
 	virtual sem_id				RetraceSemaphore() = 0;

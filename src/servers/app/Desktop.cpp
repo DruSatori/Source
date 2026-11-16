@@ -2922,6 +2922,43 @@ Desktop::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		// sent by ScreenChanged(): follow the preferred mode on all
+		// workspaces, without touching the stored screen settings
+		case 'DSPC':
+		{
+			// shortcut: app_server drives only one screen (see
+			// ScreenManager::_ScanDrivers()), loop over all when it does more
+			display_mode mode;
+			int32 id;
+			{
+				AutoReadLocker _(fScreenLock);
+				Screen* screen = fVirtualScreen.ScreenAt(0);
+				if (screen == NULL
+					|| screen->HWInterface()->GetPreferredMode(&mode) != B_OK)
+					break;
+				id = screen->ID();
+			}
+			if (SetScreenMode(B_CURRENT_WORKSPACE_INDEX, id, mode, false)
+					!= B_OK)
+				break;
+
+			// The other workspaces switch to the preferred mode as well (see
+			// VirtualScreen::AddScreen()), keep their configurations in line.
+			AutoWriteLocker _(fWindowLock);
+			Screen* screen = fVirtualScreen.ScreenByID(id);
+			if (screen == NULL)
+				break;
+			monitor_info info;
+			bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+			for (int32 i = 0; i < kMaxWorkspaces; i++) {
+				if (i != fCurrentWorkspace) {
+					fWorkspaces[i].CurrentScreenConfiguration().Set(id,
+						hasInfo ? &info : NULL, screen->Frame(), mode);
+				}
+			}
+			break;
+		}
+
 		default:
 			printf("Desktop %d:%s received unexpected code %" B_PRId32 "\n", 0,
 				"baron", code);
@@ -3636,16 +3673,16 @@ Desktop::_ResumeDirectFrameBufferAccess()
 }
 
 
+/*!	Called by the screen manager when a screen's preferred mode changed (a
+	virtual machine's window was resized, see
+	ACCELERANT_DISPLAY_CHANGE_SEMAPHORE). The caller holds the screen manager
+	lock, which we must not hold while taking the window lock, so the mode is
+	switched from the Desktop thread.
+*/
 void
-Desktop::ScreenChanged(Screen* screen)
+Desktop::ScreenChanged(Screen* /*screen*/)
 {
-	AutoWriteLocker windowLocker(fWindowLock);
-
-	AutoWriteLocker screenLocker(fScreenLock);
-	screen->SetPreferredMode();
-	screenLocker.Unlock();
-
-	_ScreenChanged(screen);
+	PostMessage('DSPC');
 }
 
 
