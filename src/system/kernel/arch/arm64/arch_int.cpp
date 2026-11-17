@@ -243,6 +243,17 @@ public:
 				frame->x[0] = thread_get_current_thread()->arch_info.old_x0;
 				frame->elr -= 4;
 			}
+
+			// MDSCR_EL1 is per CPU: arm EL0 software step only for a thread
+			// the debugger is single-stepping. Interrupts stay disabled until
+			// the eret.
+			bool singleStep = (atomic_get(&fThread->debug_info.flags)
+				& B_THREAD_DEBUG_SINGLE_STEP) != 0;
+			arch_cpu_info& cpu = fThread->cpu->arch;
+			if (cpu.user_single_step != singleStep) {
+				WRITE_SPECIALREG(MDSCR_EL1, singleStep ? DBG_MDSCR_SS : 0);
+				cpu.user_single_step = singleStep;
+			}
 		}
 		arm64_pop_iframe(&fThread->arch_info.iframes);
 	}
@@ -380,6 +391,31 @@ do_sync_handler(iframe * frame)
 			signalCode = FPE_FLTINV;
 			signalAddress = frame->elr;
 			break;
+
+		case EXCP_BRK:
+			if (isUser && (atomic_get(&thread_get_current_thread()->team
+					->debug_info.flags) & B_TEAM_DEBUG_DEBUGGER_INSTALLED) != 0) {
+				// ELR still points at the BRK, as debuggers expect
+				enable_interrupts();
+				user_debug_breakpoint_hit(true);
+				return;
+			}
+			exceptionType = B_GENERAL_PROTECTION_FAULT;
+			signalNumber = SIGTRAP;
+			signalCode = TRAP_BRKPT;
+			signalAddress = frame->elr;
+			break;
+
+		case EXCP_SOFTSTP_EL0:
+			// Without the flag this is a stale MDSCR_EL1.SS left by another
+			// thread (e.g. on a fresh thread's first eret); it is reset on
+			// the way out.
+			if ((atomic_get(&thread_get_current_thread()->debug_info.flags)
+					& B_THREAD_DEBUG_SINGLE_STEP) != 0) {
+				enable_interrupts();
+				user_debug_single_stepped();
+			}
+			return;
 
 		case EXCP_SVC64:
 		{
