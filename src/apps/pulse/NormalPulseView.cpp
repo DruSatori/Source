@@ -20,6 +20,7 @@
 #include <Window.h>
 
 #include <algorithm>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -108,6 +109,8 @@ NormalPulseView::DetermineVendorAndProcessor()
 	size_t logoSize = 0;
 	uint32 topologyNodeCount = 0;
 	cpu_topology_node_info* topology = NULL;
+	enum cpu_platform platform = B_CPU_UNKNOWN;
+	uint32 isaLevel = 0;
 
 	get_cpu_topology_info(NULL, &topologyNodeCount);
 	if (topologyNodeCount != 0)
@@ -115,6 +118,9 @@ NormalPulseView::DetermineVendorAndProcessor()
 	get_cpu_topology_info(topology, &topologyNodeCount);
 
 	for (uint32 i = 0; i < topologyNodeCount; i++) {
+		if (topology[i].type == B_TOPOLOGY_ROOT)
+			platform = topology[i].data.root.platform;
+
 		// Use less specific platform logo only if no vendor specific one is
 		// available
 		if (logo == NULL && topology[i].type == B_TOPOLOGY_ROOT) {
@@ -129,6 +135,7 @@ NormalPulseView::DetermineVendorAndProcessor()
 		}
 
 		if (topology[i].type == B_TOPOLOGY_PACKAGE) {
+			isaLevel = topology[i].data.package.isa_level;
 			switch (topology[i].data.package.vendor) {
 				case B_CPU_VENDOR_AMD:
 					logo = kAmdLogo;
@@ -164,6 +171,9 @@ NormalPulseView::DetermineVendorAndProcessor()
 	}
 
 	delete[] topology;
+
+	const char* isa = get_cpu_isa_string(platform, isaLevel);
+	strlcpy(fIsa, isa != NULL ? isa : "", sizeof(fIsa));
 
 	if (logo != NULL) {
 		fBrandLogo = new BBitmap(BRect(0, 0, 47, 47), B_RGBA32);
@@ -256,43 +266,66 @@ NormalPulseView::Draw(BRect rect)
 	// Processor picture
 	DrawChip(fChipRect);
 
+	// Baselines of the model and speed lines under the logo
+	float processorY = fChipRect.top + 53;
+	float speedY = fChipRect.top + 62;
+
 	if (fBrandLogo != NULL) {
 		DrawBitmap(fBrandLogo, BPoint(
 			9 + (fChipRect.Width() - fBrandLogo->Bounds().Width()) / 2,
 			fChipRect.top + 6));
 	} else {
-		// no logo for this vendor: its name in the logo's place, as large as
-		// fits, centered in the same 48 x 48 square
+		// no logo for this vendor: the two text lines go to the bottom of the
+		// chip body (DrawChip() fills fChipRect inset by 7) with a 3 pixel
+		// margin, and the vendor name, as large as fits, centered above them
+		font_height smallHeight;
+		GetFontHeight(&smallHeight);
+		speedY = fChipRect.bottom - 10 - ceilf(smallHeight.descent);
+		processorY = speedY - ceilf(smallHeight.ascent + smallHeight.descent);
+		float vendorTop = fChipRect.top + 10;
+		float vendorBottom = processorY - ceilf(smallHeight.ascent) - 2;
+
 		BFont font(be_bold_font);
 		font.SetSize(18);
 		float width = font.StringWidth(fVendor);
-		float maxWidth = fChipRect.Width() - 16;
-		if (width > maxWidth) {
-			font.SetSize(std::max(8.0f, 18 * maxWidth / width));
-			width = font.StringWidth(fVendor);
-		}
 		font_height fontHeight;
 		font.GetHeight(&fontHeight);
+		float maxWidth = fChipRect.Width() - 16;
+		float scale = std::min(maxWidth / width, (vendorBottom - vendorTop)
+			/ (fontHeight.ascent + fontHeight.descent));
+		if (scale < 1) {
+			font.SetSize(std::max(8.0f, 18 * scale));
+			width = font.StringWidth(fVendor);
+			font.GetHeight(&fontHeight);
+		}
 
-		PushState();
+		// Not PushState()/PopState(): PopState() leaves the bold font in the
+		// view's cached state, so StringWidth() below would measure with it.
+		BFont viewFont;
+		GetFont(&viewFont);
 		SetFont(&font);
 		SetHighColor(240, 240, 240);
 		MovePenTo(10 + (fChipRect.Width() - width) / 2,
-			fChipRect.top + 6 + (48 + fontHeight.ascent) / 2);
+			(vendorTop + vendorBottom + fontHeight.ascent - fontHeight.descent)
+				/ 2);
 		DrawString(fVendor);
-		PopState();
+		SetFont(&viewFont);
 	}
 
 	// Draw processor type and speed
 	SetHighColor(240, 240, 240);
 
 	float width = StringWidth(fProcessor);
-	MovePenTo(10 + (fChipRect.Width() - width) / 2, fChipRect.top + 53);
+	MovePenTo(10 + (fChipRect.Width() - width) / 2, processorY);
 	DrawString(fProcessor);
 
+	// The chip has room for one line under the model: the clock speed, or
+	// the ISA level when the speed is unknown (arm64 has no clock register).
 	char buffer[64];
 	int32 cpuSpeed = get_rounded_cpu_speed();
-	if (cpuSpeed > 1000 && (cpuSpeed % 10) == 0)
+	if (cpuSpeed <= 0)
+		strlcpy(buffer, fIsa, sizeof(buffer));
+	else if (cpuSpeed > 1000 && (cpuSpeed % 10) == 0)
 		snprintf(buffer, sizeof(buffer), B_TRANSLATE("%.2f GHz"), cpuSpeed / 1000.0f);
 	else
 		snprintf(buffer, sizeof(buffer), B_TRANSLATE("%ld MHz"), (long int)cpuSpeed);
@@ -300,7 +333,7 @@ NormalPulseView::Draw(BRect rect)
 	// We can't assume anymore that a CPU clock speed is always static.
 	// Let's compute the best font size for the CPU speed string each time...
 	width = StringWidth(buffer);
-	MovePenTo(10 + (fChipRect.Width() - width) / 2, fChipRect.top + 62);
+	MovePenTo(10 + (fChipRect.Width() - width) / 2, speedY);
 	DrawString(buffer);
 
 	PopState();

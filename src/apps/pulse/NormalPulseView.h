@@ -33,6 +33,7 @@ class NormalPulseView : public PulseView {
 		void DrawChip(BRect);
 
 		char fVendor[32], fProcessor[32];
+		char fIsa[16];
 		bigtime_t fPreviousTime;
 		ProgressBar **fProgressBars;
 		CPUButton **fCpuButtons;
