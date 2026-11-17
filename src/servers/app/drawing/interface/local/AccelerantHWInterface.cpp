@@ -1282,8 +1282,11 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 		return;
 
 	bool cursorSet = false;
+	// The hardware cursor cannot show a drag bitmap, so use the software
+	// cursor while dragging (SetDragBitmap() calls us again when it ends).
+	bool dragging = fDragBitmap.IsSet();
 
-	if (fAccSetCursorBitmap != NULL) {
+	if (!dragging && fAccSetCursorBitmap != NULL) {
 		// Bitmap cursor
 		// TODO are x and y switched for this, too?
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
@@ -1298,7 +1301,8 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 			cursor->Bits()) == B_OK;
 	}
 
-	if (!cursorSet && cursor->CursorData() != NULL && fAccSetCursorShape != NULL) {
+	if (!dragging && !cursorSet && cursor->CursorData() != NULL
+		&& fAccSetCursorShape != NULL) {
 		// BeOS BCursor, 16x16 monochrome
 		uint8 size = cursor->CursorData()[0];
 		// CursorData()[1] is color depth (always monochrome)
@@ -1355,12 +1359,34 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 	if (fAccShowCursor != NULL)
 		fAccShowCursor(cursorSet);
 
+	if (!cursorSet && fHardwareCursorEnabled) {
+		// we switched from HW to SW, so we need to draw the SW cursor
+		fHardwareCursorEnabled = false;
+		if (fCursorVisible && fFloatingOverlaysLock.Lock()) {
+			IntRect r = _CursorFrame();
+			_DrawCursor(r);
+			Invalidate(r);
+			fFloatingOverlaysLock.Unlock();
+		}
+	}
+
 	UnlockExclusiveAccess();
 
 	fHardwareCursorEnabled = cursorSet;
 
 	HWInterface::SetCursor(cursor);
 		// HWInterface claims ownership of cursor.
+}
+
+
+void
+AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
+	const BPoint& offsetFromCursor)
+{
+	HWInterface::SetDragBitmap(bitmap, offsetFromCursor);
+	// switch between HW and SW cursor for the drag (see SetCursor())
+	if (fCursor.IsSet())
+		SetCursor(fCursor.Get());
 }
 
 
