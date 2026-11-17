@@ -168,6 +168,8 @@ RemotePackageRepository HaikuPorts
 	gutenprint9-5.3.4-2
 	gutenprint9_devel-5.3.4-2
 	gzip-1.14-1
+	haikuwebkit-1.10.0-3
+	haikuwebkit_devel-1.10.0-3
 	harfbuzz-14.5.1-1
 	harfbuzz_devel-14.5.1-1
 	harfbuzz_glib-14.5.1-1
@@ -201,8 +203,10 @@ RemotePackageRepository HaikuPorts
 	libdvdread_devel-7.1.1-1
 	libedit-20260512_3.1-1
 	libedit_devel-20260512_3.1-1
+	libexecinfo-1.1-6
 	libffi-3.4.6-1
 	libffi_devel-3.4.6-1
+	libgpg_error-1.61-2
 	libicns-0.8.1-9
 	libicns_devel-0.8.1-9
 	libiconv-1.18-1
@@ -268,12 +272,14 @@ RemotePackageRepository HaikuPorts
 	libxslt_tools-1.1.45-2
 	live555-2016.06.22-6
 	live555_devel-2016.06.22-6
+	llvm12_libs-12.0.1-8
 	lz4-1.9.4-2
 	lz4_devel-1.9.4-2
 	m4-1.4.19-1
 	make-4.4.1-1
 	mandoc-1.14.6-4
 	mawk-1.3.4_20231126-1
+	mesa-22.0.5-4
 	mkdepend-1.7-5
 	mpc-1.2.1-2
 	mpc_devel-1.2.1-2
@@ -341,6 +347,7 @@ RemotePackageRepository HaikuPorts
 	vision-0.10.6-2
 	wget-1.24.5-2
 	which-2.21-6
+	woff2-1.0.2-3
 	wpa_supplicant-2.11.haiku.1-1
 	xz_utils-5.8.4-1
 	xz_utils_devel-5.8.4-1
