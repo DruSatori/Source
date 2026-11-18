@@ -31,6 +31,9 @@ struct virtio_gpu_shared_info {
 
 	uint32			max_width;			// the framebuffer's size, which
 	uint32			max_height;			// limits the display modes
+
+	uint32			preferred_width;	// host's display size, clamped to
+	uint32			preferred_height;	// the framebuffer
 };
 
 //----------------- ioctl() interface ----------------
@@ -40,6 +43,7 @@ enum {
 	VIRTIO_GPU_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
 	VIRTIO_GPU_GET_DEVICE_NAME,
 	VIRTIO_GPU_SET_DISPLAY_MODE,
+	VIRTIO_GPU_GET_DISPLAY_CHANGE_SEM,	// sem_id
 };
 
 
