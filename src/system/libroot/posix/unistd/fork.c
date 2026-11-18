@@ -186,7 +186,11 @@ pid_t
 vfork(void)
 {
 	thread_id thread = _kern_fork();
-	if (thread < 0) {
+	if (thread == 0) {
+		// we are the child; refresh the cached IDs like fork() does
+		__main_thread_id = find_thread(NULL);
+		pthread_self()->id = __main_thread_id;
+	} else if (thread < 0) {
 		// something went wrong
 		__set_errno(thread);
 		thread = -1;

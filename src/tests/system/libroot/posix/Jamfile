@@ -42,6 +42,7 @@ SimpleTest tst-mktime : tst-mktime.c ;
 SimpleTest <test>truncate : truncate.cpp ;
 SimpleTest init_rld_after_fork_test : init_rld_after_fork_test.cpp ;
 SimpleTest user_thread_fork_test : user_thread_fork_test.cpp ;
+SimpleTest vfork_getpid_test : vfork_getpid_test.c ;
 SimpleTest pthread_barrier_test : pthread_barrier_test.cpp ;
 SimpleTest pthread_clock_test : pthread_clock_test.cpp ;
 SimpleTest posix_spawn_test : posix_spawn_test.cpp ;
