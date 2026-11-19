@@ -135,6 +135,7 @@ RemotePackageRepository HaikuPorts
 	gcc_jit_devel-13.3.0_2023_08_10-7
 	gcc_syslibs-13.3.0_2023_08_10-7
 	gcc_syslibs_devel-13.3.0_2023_08_10-7
+	gdb-17.2-4
 	gettext-1.0-1
 	gettext_devel-1.0-1
 	gettext_libintl-1.0-1
@@ -179,6 +180,7 @@ RemotePackageRepository HaikuPorts
 	icu74-74.1-6
 	icu74_devel-74.1-6
 	icu74_tools-74.1-6
+	isl-0.25-1
 	itstool-2.0.7-4
 	jam-2.5_2021_10_29-2
 	jasper-2.0.33-2
@@ -353,6 +355,7 @@ RemotePackageRepository HaikuPorts
 	which-2.21-6
 	woff2-1.0.2-3
 	wpa_supplicant-2.11.haiku.1-1
+	xxhash-0.8.3-1
 	xz_utils-5.8.4-1
 	xz_utils_devel-5.8.4-1
 	yasm-1.3.0-5

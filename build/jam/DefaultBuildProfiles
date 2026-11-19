@@ -179,7 +179,7 @@ rule DefineDefaultBuildProfiles
 					mkdepend mpc mpfr nasm openssl3_devel patch pkgconfig
 					texinfo zlib_devel zstd_devel
 					# more build tools
-					autoconf_archive cmake doxygen gettext gperf help2man
+					autoconf_archive cmake doxygen gdb gettext gperf help2man
 					libtool libtool_libltdl meson ninja python3.14 swig
 					yasm
 					# more headers and libraries
