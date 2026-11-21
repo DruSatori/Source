@@ -34,6 +34,10 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)virtio_gpu_accelerant_retrace_semaphore;
 		case ACCELERANT_DISPLAY_CHANGE_SEMAPHORE:
 			return (void*)virtio_gpu_display_change_semaphore;
+		case ACCELERANT_FRAME_BUFFER_CHANGED:
+			return (void*)virtio_gpu_frame_buffer_changed;
+		case ACCELERANT_DIRECT_FRAME_BUFFER_CLIENT:
+			return (void*)virtio_gpu_direct_frame_buffer_client;
 
 		/* mode configuration */
 		case B_ACCELERANT_MODE_COUNT:

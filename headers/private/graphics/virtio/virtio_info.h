@@ -47,6 +47,15 @@ enum {
 	VIRTIO_GPU_SET_CURSOR,		// virtio_gpu_cursor_image
 	VIRTIO_GPU_MOVE_CURSOR,		// virtio_gpu_cursor_position
 	VIRTIO_GPU_SHOW_CURSOR,		// bool
+	VIRTIO_GPU_FRAME_BUFFER_CHANGED,	// virtio_gpu_dirty_rect
+	VIRTIO_GPU_DIRECT_CLIENT,	// bool: added
+};
+
+struct virtio_gpu_dirty_rect {
+	int32			left;				// inclusive
+	int32			top;
+	int32			right;
+	int32			bottom;
 };
 
 #define VIRTIO_GPU_CURSOR_SIZE	64

@@ -90,6 +90,9 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 
+	virtual	status_t			Invalidate(const BRect& frame);
+	virtual	void				DirectFrameBufferClient(bool added);
+
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
 
@@ -106,6 +109,7 @@ private:
 			status_t			_UpdateFrameBufferConfig();
 			void				_RegionToRectParams(/*const*/ BRegion* region,
 									uint32* count) const;
+			void				_FrameBufferChanged(const IntRect& area) const;
 			uint32				_NativeColor(const rgb_color& color) const;
 			status_t			_FindBestMode(const display_mode& compareMode,
 									float compareAspectRatio,
@@ -141,6 +145,10 @@ private:
 			set_cursor_bitmap		fAccSetCursorBitmap;
 			move_cursor				fAccMoveCursor;
 			show_cursor				fAccShowCursor;
+			// see <accelerant_private_hooks.h>
+			void					(*fAccFrameBufferChanged)(int32 left,
+										int32 top, int32 right, int32 bottom);
+			void					(*fAccDirectFrameBufferClient)(bool added);
 
 			// dpms hooks
 			dpms_capabilities	fAccDPMSCapabilities;

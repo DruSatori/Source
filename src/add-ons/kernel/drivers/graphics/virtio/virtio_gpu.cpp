@@ -63,6 +63,15 @@ typedef struct {
 
 	thread_id				updateThread;
 	bool					updateThreadRunning;
+	sem_id					updateSem;
+		// wakes the update thread, see virtio_gpu_wake_update_thread()
+	int32					updateWakePending;
+	mutex					dirtyLock;
+	virtio_gpu_dirty_rect	dirty;
+		// the part of the framebuffer that changed since the last transfer,
+		// empty when right < left
+	int32					directClients;
+		// BDirectWindows, which write the framebuffer without telling us
 	int32					displayEvent;
 		// set by the config change interrupt, handled by the update thread
 	sem_id					displayChangeSem;
@@ -391,17 +400,23 @@ virtio_gpu_set_scanout(virtio_gpu_driver_info* info, int scanoutId, int resource
 }
 
 
+/*!	Copies the rectangle at \a x, \a y of the resource's backing to the host;
+	\a offset is where its left top pixel is in the backing.
+*/
 status_t
 virtio_gpu_transfer_to_host_2d(virtio_gpu_driver_info* info, int resourceId,
-    uint32 width, uint32 height)
+    uint32 width, uint32 height, uint32 x = 0, uint32 y = 0, uint64 offset = 0)
 {
 	struct virtio_gpu_transfer_to_host_2d transferToHost = {};
 	struct virtio_gpu_ctrl_hdr response = {};
 
 	transferToHost.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
 	transferToHost.resource_id = resourceId;
+	transferToHost.r.x = x;
+	transferToHost.r.y = y;
 	transferToHost.r.width = width;
 	transferToHost.r.height = height;
+	transferToHost.offset = offset;
 
 	virtio_gpu_send_cmd(info, &transferToHost, sizeof(transferToHost), &response,
 		sizeof(response));
@@ -417,13 +432,15 @@ virtio_gpu_transfer_to_host_2d(virtio_gpu_driver_info* info, int resourceId,
 
 status_t
 virtio_gpu_flush_resource(virtio_gpu_driver_info* info, int resourceId, uint32 width,
-    uint32 height)
+    uint32 height, uint32 x = 0, uint32 y = 0)
 {
 	struct virtio_gpu_resource_flush resourceFlush = {};
 	struct virtio_gpu_ctrl_hdr response = {};
 
 	resourceFlush.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
 	resourceFlush.resource_id = resourceId;
+	resourceFlush.r.x = x;
+	resourceFlush.r.y = y;
 	resourceFlush.r.width = width;
 	resourceFlush.r.height = height;
 
@@ -552,28 +569,104 @@ virtio_gpu_update_cursor_image(virtio_gpu_driver_info* info)
 }
 
 
+// Even when nothing reports a change, the whole framebuffer is copied this
+// often: a safety net for whatever writes to it without telling us.
+static const bigtime_t kFullUpdateInterval = 1000000;
+// While clients write to the framebuffer on their own (BWindowScreen,
+// BDirectWindow), the whole of it is copied this often.
+static const bigtime_t kDirectUpdateInterval = 20000;
+// Changes in quick succession are copied together, at most this often.
+static const bigtime_t kMinUpdateInterval = 8000;
+// When a cursor command the host was not ready for is tried again.
+static const bigtime_t kCursorRetryInterval = 5000;
+
+
+/*!	Has the update thread look for work. May be called from an interrupt. */
+static void
+virtio_gpu_wake_update_thread(virtio_gpu_driver_info* info)
+{
+	// one wake up is enough until the thread got to it
+	if (atomic_get_and_set(&info->updateWakePending, 1) == 0)
+		release_sem_etc(info->updateSem, 1, B_DO_NOT_RESCHEDULE);
+}
+
+
+/*!	Copies the parts of the framebuffer that app_server reports as changed
+	(VIRTIO_GPU_FRAME_BUFFER_CHANGED) to the host, when they change, and
+	handles the display events and the cursor commands the host was not ready
+	for.
+*/
 status_t
 virtio_update_thread(void *arg)
 {
 	virtio_gpu_driver_info* info = (virtio_gpu_driver_info*)arg;
+	bigtime_t lastUpdate = 0;
+	bigtime_t lastFullUpdate = 0;
+	bool cursorPending = false;
 
 	while (info->updateThreadRunning) {
-		bigtime_t start = system_time();
+		// a BWindowScreen opens the device a second time
+		bool direct = atomic_get(&info->directClients) > 0 || info->openCount > 1;
+		bigtime_t fullUpdate = lastFullUpdate
+			+ (direct ? kDirectUpdateInterval : kFullUpdateInterval);
+		bigtime_t timeout = fullUpdate;
+		if (cursorPending)
+			timeout = min_c(timeout, system_time() + kCursorRetryInterval);
+		acquire_sem_etc(info->updateSem, 1, B_ABSOLUTE_TIMEOUT, timeout);
+		atomic_set(&info->updateWakePending, 0);
+		if (!info->updateThreadRunning)
+			break;
+
 		virtio_gpu_update_cursor_image(info);
 		{
 			MutexLocker cursorLocker(&info->cursorLock);
 			virtio_gpu_send_cursor(info, 0);
+			cursorPending = info->cursorPending != 0;
+		}
+
+		bool full = system_time() >= fullUpdate;
+		if (!full) {
+			// let a burst of changes come together
+			bool dirty;
+			{
+				MutexLocker dirtyLocker(&info->dirtyLock);
+				dirty = info->dirty.right >= info->dirty.left;
+			}
+			if (dirty && system_time() < lastUpdate + kMinUpdateInterval)
+				snooze_until(lastUpdate + kMinUpdateInterval, B_SYSTEM_TIMEBASE);
+		}
+
+		virtio_gpu_dirty_rect rect;
+		{
+			MutexLocker dirtyLocker(&info->dirtyLock);
+			rect = info->dirty;
+			info->dirty.left = 0;
+			info->dirty.right = -1;
+		}
+		if (full) {
+			rect.left = rect.top = 0;
+			rect.right = rect.bottom = INT32_MAX;
 		}
 
 		MutexLocker commandLocker(&info->commandLock);
 		if (atomic_get_and_set(&info->displayEvent, 0) != 0)
 			virtio_gpu_handle_display_event(info);
-		virtio_gpu_transfer_to_host_2d(info, info->displayResourceId, info->displayWidth,
-			info->displayHeight);
-		virtio_gpu_flush_resource(info, info->displayResourceId, info->displayWidth, info->displayHeight);
-		bigtime_t delay = system_time() - start;
-		if (delay < 20000)
-			snooze(20000 - delay);
+
+		// the mode may have changed since
+		rect.right = min_c(rect.right, (int32)info->displayWidth - 1);
+		rect.bottom = min_c(rect.bottom, (int32)info->displayHeight - 1);
+		if (rect.right >= rect.left && rect.bottom >= rect.top) {
+			uint32 width = rect.right - rect.left + 1;
+			uint32 height = rect.bottom - rect.top + 1;
+			uint64 offset = ((uint64)rect.top * info->displayWidth + rect.left) * 4;
+			virtio_gpu_transfer_to_host_2d(info, info->displayResourceId, width, height,
+				rect.left, rect.top, offset);
+			virtio_gpu_flush_resource(info, info->displayResourceId, width, height,
+				rect.left, rect.top);
+			lastUpdate = system_time();
+		}
+		if (full)
+			lastFullUpdate = system_time();
 	}
 	return B_OK;
 }
@@ -778,6 +871,7 @@ virtio_gpu_teardown_display(virtio_gpu_driver_info* info)
 	// stop the update thread first: it uses the resource and the framebuffer
 	if (info->updateThread >= 0) {
 		info->updateThreadRunning = false;
+		release_sem(info->updateSem);
 		status_t result;
 		wait_for_thread(info->updateThread, &result);
 		info->updateThread = -1;
@@ -831,6 +925,8 @@ virtio_gpu_teardown_display(virtio_gpu_driver_info* info)
 	info->sharedInfo = NULL;
 	delete_sem(info->displayChangeSem);
 	info->displayChangeSem = -1;
+	delete_sem(info->updateSem);
+	info->updateSem = -1;
 }
 
 
@@ -947,6 +1043,16 @@ virtio_gpu_setup_display(virtio_gpu_driver_info* info)
 	info->cursorPending = 0;
 	info->cursorNewImage = NULL;
 
+	info->dirty.left = 0;
+	info->dirty.right = -1;
+	info->directClients = 0;
+	info->updateWakePending = 0;
+	info->updateSem = create_sem(0, "virtio_gpu update");
+	if (info->updateSem < B_OK) {
+		status = info->updateSem;
+		goto error;
+	}
+
 	info->displayEvent = 1;
 		// acknowledges an event still pending from before we opened
 	info->updateThreadRunning = true;
@@ -990,6 +1096,8 @@ virtio_gpu_open(void* _info, const char* path, int openMode, void** _cookie)
 		}
 	}
 	info->openCount++;
+	if (info->openCount > 1)
+		virtio_gpu_wake_update_thread(info);
 
 	*_cookie = handle;
 	return B_OK;
@@ -1030,6 +1138,7 @@ virtio_gpu_config_changed(void* cookie)
 {
 	virtio_gpu_driver_info* info = (virtio_gpu_driver_info*)cookie;
 	atomic_set(&info->displayEvent, 1);
+	virtio_gpu_wake_update_thread(info);
 }
 
 
@@ -1168,7 +1277,10 @@ virtio_gpu_ioctl(void* cookie, uint32 op, void* buffer, size_t length)
 			MutexLocker cursorLocker(&info->cursorLock);
 			info->cursor.pos.x = position.x;
 			info->cursor.pos.y = position.y;
-			return virtio_gpu_send_cursor(info, VIRTIO_GPU_CMD_MOVE_CURSOR);
+			status_t status = virtio_gpu_send_cursor(info, VIRTIO_GPU_CMD_MOVE_CURSOR);
+			if (info->cursorPending != 0)
+				virtio_gpu_wake_update_thread(info);
+			return status;
 		}
 
 		case VIRTIO_GPU_SHOW_CURSOR:
@@ -1184,7 +1296,56 @@ virtio_gpu_ioctl(void* cookie, uint32 op, void* buffer, size_t length)
 			// resource 0 hides the cursor
 			MutexLocker cursorLocker(&info->cursorLock);
 			info->cursor.resource_id = visible ? CURSOR_RESOURCE_ID : 0;
-			return virtio_gpu_send_cursor(info, VIRTIO_GPU_CMD_UPDATE_CURSOR);
+			status_t status = virtio_gpu_send_cursor(info, VIRTIO_GPU_CMD_UPDATE_CURSOR);
+			if (info->cursorPending != 0)
+				virtio_gpu_wake_update_thread(info);
+			return status;
+		}
+
+		case VIRTIO_GPU_FRAME_BUFFER_CHANGED:
+		{
+			virtio_gpu_dirty_rect rect;
+			if (length != sizeof(rect))
+				return B_BAD_VALUE;
+			if (user_memcpy(&rect, buffer, sizeof(rect)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			// the update thread clips it to the display
+			rect.left = max_c(rect.left, 0);
+			rect.top = max_c(rect.top, 0);
+			if (rect.right < rect.left || rect.bottom < rect.top)
+				return B_OK;
+
+			{
+				MutexLocker dirtyLocker(&info->dirtyLock);
+				virtio_gpu_dirty_rect& dirty = info->dirty;
+				if (dirty.right < dirty.left)
+					dirty = rect;
+				else {
+					// shortcut: one bounding rectangle, so two small changes
+					// far apart copy all in between; keep several rectangles
+					// if that shows up in the host's load
+					dirty.left = min_c(dirty.left, rect.left);
+					dirty.top = min_c(dirty.top, rect.top);
+					dirty.right = max_c(dirty.right, rect.right);
+					dirty.bottom = max_c(dirty.bottom, rect.bottom);
+				}
+			}
+			virtio_gpu_wake_update_thread(info);
+			return B_OK;
+		}
+
+		case VIRTIO_GPU_DIRECT_CLIENT:
+		{
+			bool added;
+			if (length != sizeof(added))
+				return B_BAD_VALUE;
+			if (user_memcpy(&added, buffer, sizeof(added)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			atomic_add(&info->directClients, added ? 1 : -1);
+			virtio_gpu_wake_update_thread(info);
+			return B_OK;
 		}
 		default:
 			ERROR("ioctl: unknown message %" B_PRIx32 "\n", op);
@@ -1258,7 +1419,9 @@ virtio_gpu_init_driver(device_node* node, void** cookie)
 	info->commandDone = -1;
 	info->updateThread = -1;
 	info->displayChangeSem = -1;
+	info->updateSem = -1;
 	mutex_init(&info->openLock, "virtio_gpu open lock");
+	mutex_init(&info->dirtyLock, "virtio_gpu dirty lock");
 
 	info->node = node;
 
@@ -1273,6 +1436,7 @@ virtio_gpu_uninit_driver(void* _cookie)
 	CALLED();
 	virtio_gpu_driver_info* info = (virtio_gpu_driver_info*)_cookie;
 	mutex_destroy(&info->openLock);
+	mutex_destroy(&info->dirtyLock);
 	free(info);
 }
 

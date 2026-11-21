@@ -12,12 +12,13 @@
 
 #include <DirectWindowPrivate.h>
 
+class HWInterface;
 class RenderingBuffer;
 
 
 class DirectWindowInfo {
 public:
-								DirectWindowInfo();
+								DirectWindowInfo(HWInterface* interface);
 								~DirectWindowInfo();
 
 			status_t			InitCheck() const;
@@ -46,6 +47,7 @@ public:
 private:
 			status_t			_SynchronizeWithClient();
 
+			HWInterface*		fInterface;
 			direct_buffer_info*	fBufferInfo;
 			sem_id				fSem;
 			sem_id				fAcknowledgeSem;

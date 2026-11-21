@@ -122,6 +122,8 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccSetCursorBitmap(NULL),
 	fAccMoveCursor(NULL),
 	fAccShowCursor(NULL),
+	fAccFrameBufferChanged(NULL),
+	fAccDirectFrameBufferClient(NULL),
 
 	// dpms hooks
 	fAccDPMSCapabilities(NULL),
@@ -419,6 +421,13 @@ AccelerantHWInterface::_SetupDefaultHooks()
 		= (set_cursor_bitmap)fAccelerantHook(B_SET_CURSOR_BITMAP, NULL);
 	fAccMoveCursor = (move_cursor)fAccelerantHook(B_MOVE_CURSOR, NULL);
 	fAccShowCursor = (show_cursor)fAccelerantHook(B_SHOW_CURSOR, NULL);
+
+	// frame buffer updates, for devices that need to be told
+	fAccFrameBufferChanged = (accelerant_frame_buffer_changed)fAccelerantHook(
+		ACCELERANT_FRAME_BUFFER_CHANGED, NULL);
+	fAccDirectFrameBufferClient
+		= (accelerant_direct_frame_buffer_client)fAccelerantHook(
+			ACCELERANT_DIRECT_FRAME_BUFFER_CLIENT, NULL);
 
 	// dpms
 	fAccDPMSCapabilities
@@ -1468,14 +1477,46 @@ AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 }
 
 
+/*! The object needs to be already locked!
+*/
+status_t
+AccelerantHWInterface::Invalidate(const BRect& frame)
+{
+	status_t status = HWInterface::Invalidate(frame);
+	if (status == B_OK)
+		_FrameBufferChanged(IntRect(frame));
+	return status;
+}
+
+
+void
+AccelerantHWInterface::DirectFrameBufferClient(bool added)
+{
+	if (fAccDirectFrameBufferClient != NULL)
+		fAccDirectFrameBufferClient(added);
+}
+
+
+/*!	Tells the accelerant that \a area of the front buffer changed. */
+void
+AccelerantHWInterface::_FrameBufferChanged(const IntRect& area) const
+{
+	if (fAccFrameBufferChanged != NULL && area.IsValid())
+		fAccFrameBufferChanged(area.left, area.top, area.right, area.bottom);
+}
+
+
 // #pragma mark -
 
 
 void
 AccelerantHWInterface::_DrawCursor(IntRect area) const
 {
-	if (!fHardwareCursorEnabled)
+	if (!fHardwareCursorEnabled) {
 		HWInterface::_DrawCursor(area);
+		// not only called from Invalidate()
+		_FrameBufferChanged(area & _CursorFrame());
+	}
 }
 
 
