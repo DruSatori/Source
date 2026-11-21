@@ -177,6 +177,10 @@ public:
 	// while CopyBackToFront() actually performs the operation
 	virtual	status_t			CopyBackToFront(const BRect& frame);
 
+	// RenkuOS: a client that writes to the frame buffer on its own, without
+	// Invalidate() (a BDirectWindow), was \a added, or is gone
+	virtual	void				DirectFrameBufferClient(bool added) {}
+
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
 

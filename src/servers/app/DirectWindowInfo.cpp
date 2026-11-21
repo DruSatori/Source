@@ -17,12 +17,17 @@
 #include <Autolock.h>
 #include <kernel.h>
 
+#include "HWInterface.h"
 #include "RenderingBuffer.h"
 #include "clipping.h"
 
 
-DirectWindowInfo::DirectWindowInfo()
+/*!	The window may write to \a interface's frame buffer without telling it,
+	for as long as this exists.
+*/
+DirectWindowInfo::DirectWindowInfo(HWInterface* interface)
 	:
+	fInterface(interface),
 	fBufferInfo(NULL),
 	fSem(-1),
 	fAcknowledgeSem(-1),
@@ -40,6 +45,8 @@ DirectWindowInfo::DirectWindowInfo()
 
 	fSem = create_sem(0, "direct sem");
 	fAcknowledgeSem = create_sem(0, "direct sem ack");
+
+	fInterface->DirectFrameBufferClient(true);
 }
 
 
@@ -52,6 +59,8 @@ DirectWindowInfo::~DirectWindowInfo()
 	delete_area(fBufferArea);
 	delete_sem(fSem);
 	delete_sem(fAcknowledgeSem);
+
+	fInterface->DirectFrameBufferClient(false);
 }
 
 

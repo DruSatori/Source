@@ -4633,7 +4633,8 @@ ServerWindow::_EnableDirectWindowMode()
 		return B_UNSUPPORTED;
 	}
 
-	fDirectWindowInfo.SetTo(new(std::nothrow) DirectWindowInfo);
+	fDirectWindowInfo.SetTo(new(std::nothrow) DirectWindowInfo(
+		fDesktop->HWInterface()));
 	if (!fDirectWindowInfo.IsSet())
 		return B_NO_MEMORY;
 

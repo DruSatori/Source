@@ -217,6 +217,25 @@ virtio_gpu_display_change_semaphore()
 }
 
 
+/*!	The host only shows what it is told about: the driver copies the changed
+	parts of the frame buffer to it.
+*/
+void
+virtio_gpu_frame_buffer_changed(int32 left, int32 top, int32 right,
+	int32 bottom)
+{
+	virtio_gpu_dirty_rect rect = { left, top, right, bottom };
+	ioctl(gInfo->device, VIRTIO_GPU_FRAME_BUFFER_CHANGED, &rect, sizeof(rect));
+}
+
+
+void
+virtio_gpu_direct_frame_buffer_client(bool added)
+{
+	ioctl(gInfo->device, VIRTIO_GPU_DIRECT_CLIENT, &added, sizeof(added));
+}
+
+
 //	#pragma mark - cursor
 
 
