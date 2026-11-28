@@ -63,7 +63,9 @@ requires {
 #endif
 
 #ifdef HAIKU_REGULAR_BUILD
+#if defined(HAIKU_PACKAGING_ARCH_x86_64)
 	atheros10k_wifi_firmwares
+#endif
 	intel_wifi_firmwares
 	mediatek_wifi_firmwares
 	realtek_rtw88_wifi_firmwares

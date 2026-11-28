@@ -23,7 +23,10 @@ if $(HAIKU_BUILD_TYPE) = test {
 }
 
 if $(HAIKU_BUILD_TYPE) = regular {
-	packages += Atheros10kWifiFirmwares ;
+	# atheros10kwifi is only built for x86_64
+	if $(TARGET_ARCH) = x86_64 {
+		packages += Atheros10kWifiFirmwares ;
+	}
 	packages += MediatekWifiFirmwares ;
 	packages += RealtekRtw88WifiFirmwares ;
 }
